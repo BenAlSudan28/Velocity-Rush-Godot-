@@ -1,0 +1,31 @@
+config_version=5
+
+[application]
+
+config/name="Velocity Rush 3D"
+config/description="3D Arcade Street Racing"
+run/main_scene="res://scenes/main.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+window/handheld/orientation=0
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.035, 0.055, 0.09, 1)
+
+[physics]
+
+3d/default_gravity=9.8
+
+[application/run]
+
+max_fps=60

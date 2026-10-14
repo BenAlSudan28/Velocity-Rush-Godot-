@@ -1,0 +1,19 @@
+Velocity Rush 3D — Upgrade notes (Godot 4.4.1)
+
+Implemented in this source package:
+- Main menu with RACE MODE, FREE DRIVE, GARAGE, SETTINGS and SOUND toggle.
+- Added hold-to-accelerate pedal; brake and nitro remain press-and-hold controls.
+- Added chase/cockpit camera toggle and on-screen steering-wheel mode.
+- Added local WAV assets for looping engine, brake burst, nitro, crash, tire squeal and original synthesized menu music.
+- Engine pitch/volume follow the in-game speed variable; tire squeal is triggered by high-speed steering.
+- Audio and steering preferences are saved in user://velocity_settings.cfg.
+- Settings include engine/effects/music volume and wheel/button steering toggle.
+- Project remains Godot/GDScript and keeps the existing Android export preset and GitHub Actions workflow.
+
+Known limitations (not claimed as complete):
+- The car meshes remain procedural low-poly meshes, not licensed photorealistic Ferrari/Toyota models.
+- Engine/brake/turbo/tire/crash audio are original synthesized WAV effects, not recordings of real cars.
+- Tilt steering, advanced tire physics, true race placement/laps, a multi-car garage, and a branded icon based on a separate reference image are not implemented in this package.
+- The music is an original synthesized loop, not a licensed commercial soundtrack.
+
+Please build using the current GitHub Actions workflow and test on-device. This environment did not run the Godot engine, so a successful APK build is not claimed here.
