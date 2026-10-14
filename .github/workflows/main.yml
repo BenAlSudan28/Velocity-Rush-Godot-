@@ -1,1 +1,183 @@
-3
+name: Build Velocity Rush 3D APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Export Android APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    env:
+      GODOT_BIN: ./godot-bin/Godot_v4.4.1-stable_linux.x86_64
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Check project files
+        run: |
+          test -f project.godot || { echo "::error::project.godot not found in repo root"; exit 1; }
+          test -f export_presets.cfg || { echo "::error::export_presets.cfg not found - export the Android preset once from the Godot editor and commit it"; exit 1; }
+          grep -q 'name="Android"' export_presets.cfg || { echo "::error::Export preset must be named exactly: Android"; exit 1; }
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # packages: '' prevents the action from running "sdkmanager tools",
+      # a package that no longer exists in the Android SDK repository.
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android packages
+        run: |
+          sdkmanager --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.1" \
+            "cmdline-tools;latest" \
+            "cmake;3.10.2.4988404" \
+            "ndk;28.1.13356709"
+
+      - name: Download Godot 4.4.1
+        run: |
+          wget -q \
+            https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip \
+            -O godot.zip
+
+          unzip -q godot.zip -d godot-bin
+          chmod +x "$GODOT_BIN"
+
+      - name: Install matching Android export templates
+        run: |
+          wget -q \
+            https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz \
+            -O godot-templates.tpz
+
+          mkdir -p /tmp/godot-templates
+          unzip -q godot-templates.tpz -d /tmp/godot-templates
+
+          TEMPLATES_DIR="$HOME/.local/share/godot/export_templates/4.4.1.stable"
+          mkdir -p "$TEMPLATES_DIR"
+          mv /tmp/godot-templates/templates/* "$TEMPLATES_DIR/"
+
+          ls "$TEMPLATES_DIR" | grep -i android
+
+      - name: Create Android debug keystore
+        run: |
+          mkdir -p "$HOME/.android"
+
+          keytool -genkeypair \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
+          {
+            echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$HOME/.android/debug.keystore"
+            echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey"
+            echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android"
+          } >> "$GITHUB_ENV"
+
+      - name: Configure Godot Android paths
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.config/godot"
+
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+          # Godot 4.0-4.2 used a file name without the minor version
+          cp "$HOME/.config/godot/editor_settings-4.4.tres" "$HOME/.config/godot/editor_settings-4.tres"
+
+      # Godot hides the real list of config errors in headless mode,
+      # so print everything it checks and fail early on known blockers.
+      - name: Diagnose Android export setup
+        run: |
+          echo "--- export preset (key values) ---"
+          grep -E '^(name|platform|export_path|gradle_build/(use_gradle_build|export_format)|package/unique_name|architectures/|keystore/|custom_template/)' export_presets.cfg || true
+
+          echo "--- project ETC2/ASTC ---"
+          grep -n "import_etc2_astc" project.godot || echo "not set (will be patched in next step)"
+
+          echo "--- export templates ---"
+          ls -lh "$HOME/.local/share/godot/export_templates/4.4.1.stable" | grep -i -E "android|version" || true
+
+          echo "--- editor settings / SDK ---"
+          ls "$HOME/.config/godot"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "JAVA_HOME=$JAVA_HOME"
+          ls "$ANDROID_HOME/build-tools" "$ANDROID_HOME/platforms" "$ANDROID_HOME/cmdline-tools" || true
+
+          if grep -q '^gradle_build/use_gradle_build=true' export_presets.cfg && [ ! -d android/build ]; then
+            echo "::error::Gradle build is ON in the Android preset but android/build is missing. Turn 'Use Gradle Build' OFF in the Godot export preset."
+            exit 1
+          fi
+
+      # Android export requires ETC2/ASTC texture compression.
+      # Better long term: enable it once in Godot (Project Settings > Rendering >
+      # Textures > VRAM Compression > Import ETC2 ASTC) and commit project.godot.
+      - name: Enable ETC2/ASTC texture compression
+        run: |
+          python3 - <<'PY'
+          import re
+          p = "project.godot"
+          s = open(p, encoding="utf-8").read()
+          key = "textures/vram_compression/import_etc2_astc"
+          if re.search(r"^" + re.escape(key) + r"\s*=", s, re.M):
+              s = re.sub(r"^" + re.escape(key) + r"\s*=.*$", key + "=true", s, flags=re.M)
+          elif re.search(r"^\[rendering\]\s*$", s, re.M):
+              s = re.sub(r"^\[rendering\]\s*$", "[rendering]\n\n" + key + "=true", s, count=1, flags=re.M)
+          else:
+              s = s.rstrip("\n") + "\n\n[rendering]\n\n" + key + "=true\n"
+          open(p, "w", encoding="utf-8").write(s)
+          print("ETC2/ASTC enabled in project.godot")
+          PY
+
+      - name: Import Godot project
+        run: |
+          "$GODOT_BIN" --headless --path . --import || echo "Import finished with a non-zero exit code, continuing..."
+
+      - name: Export Android APK
+        run: |
+          mkdir -p build
+          "$GODOT_BIN" \
+            --headless \
+            --path . \
+            --export-debug "Android" build/VelocityRush3D.apk
+
+      - name: Verify APK
+        run: |
+          test -s build/VelocityRush3D.apk
+          ls -lh build/VelocityRush3D.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Velocity-Rush-3D-APK
+          path: build/VelocityRush3D.apk
+          if-no-files-found: error
